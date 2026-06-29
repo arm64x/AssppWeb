@@ -27,7 +27,6 @@ export function useDownloadAction() {
     versionId?: string,
   ) {
     const ctx = getAccountContext(account, t);
-    const appName = app.name;
 
     try {
       const settings = await apiGet<{ maxDownloadMB: number }>("/api/settings");
@@ -36,7 +35,7 @@ export function useDownloadAction() {
         if (sizeMB > settings.maxDownloadMB) {
           addToast(
             t("toast.downloadLimit.message", {
-              appName,
+              appName: app.name || String(app.id),
               size: sizeMB.toFixed(2),
               limit: settings.maxDownloadMB,
             }),
@@ -58,8 +57,27 @@ export function useDownloadAction() {
     await updateAccount({ ...account, cookies: updatedCookies });
     const hash = await accountHash(account);
 
+    // Fill in real name/bundleID/icon/artist recovered from Apple's own
+    // response. This only overrides fields the caller left blank (e.g.
+    // the App ID stub), so a real lookup result is never clobbered. If
+    // Apple's response is missing a field too, fall back to the numeric
+    // Adam ID rather than leaving name/bundleID empty.
+    const resolved = output.resolvedSoftware ?? {};
+    const fallbackId = String(app.id);
+    const resolvedApp: Software = {
+      ...app,
+      version: output.bundleShortVersionString,
+      name: app.name || resolved.name || fallbackId,
+      bundleID: app.bundleID || resolved.bundleID || fallbackId,
+      artistName: app.artistName || resolved.artistName || app.artistName,
+      artworkUrl: app.artworkUrl || resolved.artworkUrl || app.artworkUrl,
+      primaryGenreName:
+        app.primaryGenreName || resolved.primaryGenreName || app.primaryGenreName,
+    };
+    const appName = resolvedApp.name;
+
     await apiPost("/api/downloads", {
-      software: { ...app, version: output.bundleShortVersionString },
+      software: resolvedApp,
       accountHash: hash,
       downloadURL: output.downloadURL,
       sinfs: output.sinfs,
@@ -111,7 +129,7 @@ export function useDownloadAction() {
     const ctx = getAccountContext(account, t);
     addToast(
       t("toast.msgFailed", {
-        appName: app.name,
+        appName: app.name || String(app.id),
         ...ctx,
         error: getErrorMessage(error, t("toast.title.downloadFailed")),
       }),

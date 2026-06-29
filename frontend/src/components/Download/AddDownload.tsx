@@ -26,7 +26,11 @@ export default function AddDownload() {
     toastLicenseError,
   } = useDownloadAction();
 
+  const [identifierMode, setIdentifierMode] = useState<"bundleId" | "appId">(
+    "bundleId",
+  );
   const [bundleId, setBundleId] = useState("");
+  const [appId, setAppId] = useState("");
   const [country, setCountry] = useState(defaultCountry);
   const [countryTouched, setCountryTouched] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState("");
@@ -37,6 +41,10 @@ export default function AddDownload() {
   const [loadingAction, setLoadingAction] = useState<
     "lookup" | "license" | "versions" | "download" | null
   >(null);
+
+  const isAppIdMode = identifierMode === "appId";
+  const identifierValue = isAppIdMode ? appId : bundleId;
+  const isAppIdValid = /^\d+$/.test(appId.trim());
 
   const isLoading = loadingAction !== null;
 
@@ -82,9 +90,43 @@ export default function AddDownload() {
     }
   }, [autoCountry, country, countryTouched, defaultCountry]);
 
+  /// Builds a stub Software for a numeric Adam ID, mirroring
+  /// Download.swift's resolveApp(): no iTunes lookup is performed,
+  /// since the app may no longer be listed on the App Store. name and
+  /// bundleID are left blank (not the numeric ID) so that the real
+  /// values Apple returns in the download response itself — recovered
+  /// in useDownloadAction.startDownload — take priority over this stub.
+  function buildAppIdStub(adamId: string): Software {
+    return {
+      id: Number(adamId),
+      bundleID: "",
+      name: "",
+      version: "",
+      artistName: "",
+      sellerName: "",
+      description: "",
+      averageUserRating: 0,
+      userRatingCount: 0,
+      artworkUrl: "",
+      screenshotUrls: [],
+      minimumOsVersion: "",
+      releaseDate: "",
+      primaryGenreName: "",
+    };
+  }
+
   async function handleLookup(e: React.FormEvent) {
     e.preventDefault();
-    if (!bundleId.trim()) return;
+    if (!identifierValue.trim()) return;
+
+    // App ID mode: there's nothing to look up — the app may already be
+    // delisted, so go straight to the download step.
+    if (isAppIdMode) {
+      if (!isAppIdValid) return;
+      await handleDownload(buildAppIdStub(appId.trim()));
+      return;
+    }
+
     setLoadingAction("lookup");
     try {
       const result = await lookupApp(bundleId.trim(), country);
@@ -128,13 +170,14 @@ export default function AddDownload() {
     }
   }
 
-  async function handleDownload() {
-    if (!account || !app) return;
+  async function handleDownload(targetApp?: Software) {
+    const downloadApp = targetApp ?? app;
+    if (!account || !downloadApp) return;
     setLoadingAction("download");
     try {
-      await startDownload(account, app, selectedVersion || undefined);
+      await startDownload(account, downloadApp, selectedVersion || undefined);
     } catch (e) {
-      toastDownloadError(account, app, e);
+      toastDownloadError(account, downloadApp, e);
     } finally {
       setLoadingAction(null);
     }
@@ -144,29 +187,85 @@ export default function AddDownload() {
     <PageContainer title={t("downloads.add.title")}>
       <div className="space-y-6">
         <form onSubmit={handleLookup} className="space-y-4">
+          <div className="flex gap-2">
+            {(["bundleId", "appId"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => {
+                  if (mode === identifierMode) return;
+                  setIdentifierMode(mode);
+                  setApp(null);
+                  setVersions([]);
+                  setSelectedVersion("");
+                  setStep("lookup");
+                }}
+                disabled={isLoading}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  identifierMode === mode
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                }`}
+              >
+                {mode === "bundleId"
+                  ? t("downloads.add.modeBundleId")
+                  : t("downloads.add.modeAppId")}
+              </button>
+            ))}
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t("downloads.add.bundleId")}
+              {isAppIdMode
+                ? t("downloads.add.appId")
+                : t("downloads.add.bundleId")}
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
-                value={bundleId}
-                onChange={(e) => setBundleId(e.target.value)}
-                placeholder={t("downloads.add.placeholder")}
+                inputMode={isAppIdMode ? "numeric" : "text"}
+                value={isAppIdMode ? appId : bundleId}
+                onChange={(e) =>
+                  isAppIdMode
+                    ? setAppId(e.target.value)
+                    : setBundleId(e.target.value)
+                }
+                placeholder={
+                  isAppIdMode
+                    ? t("downloads.add.appIdPlaceholder")
+                    : t("downloads.add.placeholder")
+                }
                 className="block w-full flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-base text-gray-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 dark:disabled:bg-gray-800/50 disabled:text-gray-500 dark:disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
                 disabled={isLoading}
               />
               <button
                 type="submit"
-                disabled={isLoading || !bundleId.trim()}
+                disabled={
+                  isLoading ||
+                  !identifierValue.trim() ||
+                  !account ||
+                  (isAppIdMode && !isAppIdValid)
+                }
                 className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap"
               >
-                {loadingAction === "lookup"
-                  ? t("downloads.add.lookingUp")
-                  : t("downloads.add.lookup")}
+                {isAppIdMode
+                  ? loadingAction === "download"
+                    ? t("downloads.add.processing")
+                    : t("downloads.add.download")
+                  : loadingAction === "lookup"
+                    ? t("downloads.add.lookingUp")
+                    : t("downloads.add.lookup")}
               </button>
             </div>
+            {isAppIdMode && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {t("downloads.add.appIdHint")}
+              </p>
+            )}
+            {isAppIdMode && appId.trim() !== "" && !isAppIdValid && (
+              <p className="mt-1 text-xs text-red-500">
+                {t("downloads.add.invalidAppId")}
+              </p>
+            )}
           </div>
           <div className="flex w-full gap-3 overflow-hidden">
             <CountrySelect
@@ -222,12 +321,14 @@ export default function AddDownload() {
               {t("downloads.add.emptyTitle")}
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 text-center max-w-sm">
-              {t("downloads.add.emptyDesc")}
+              {isAppIdMode
+                ? t("downloads.add.emptyDescAppId")
+                : t("downloads.add.emptyDesc")}
             </p>
           </div>
         )}
 
-        {app && (
+        {!isAppIdMode && app && (
           <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4">
             <div className="flex items-center gap-4 mb-4">
               <AppIcon url={app.artworkUrl} name={app.name} size="md" />
@@ -289,7 +390,7 @@ export default function AddDownload() {
                 </button>
               )}
               <button
-                onClick={handleDownload}
+                onClick={() => handleDownload()}
                 disabled={isLoading || !account}
                 className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >

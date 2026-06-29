@@ -1,4 +1,9 @@
-import type { Account, Software, DownloadOutput, Sinf } from "../types";
+import type {
+  Account,
+  Software,
+  DownloadOutput,
+  Sinf,
+} from "../types";
 import { appleRequest } from "./request";
 import { buildPlist, parsePlist } from "./plist";
 import { extractAndMergeCookies } from "./cookies";
@@ -177,6 +182,30 @@ export async function getDownloadInfo(
     delete metadataDict["passwordToken"];
     const iTunesMetadata = base64FromString(buildPlist(metadataDict));
 
+    // Apple's response carries the real app name/bundleID/icon/artist
+    // regardless of how the app was looked up. This matters most for the
+    // App ID flow, where the Software passed in is just a numeric stub —
+    // but it's harmless (and more accurate) to recover it for the bundle
+    // ID flow too.
+    const resolvedSoftware: Partial<Software> = {};
+    const itemName = metadata.itemName as string | undefined;
+    if (itemName) resolvedSoftware.name = itemName;
+    const artistName =
+      (metadata.playlistArtistName as string | undefined) ??
+      (metadata.artistName as string | undefined);
+    if (artistName) resolvedSoftware.artistName = artistName;
+    const softwareVersionBundleId = metadata.softwareVersionBundleId as
+      | string
+      | undefined;
+    if (softwareVersionBundleId)
+      resolvedSoftware.bundleID = softwareVersionBundleId;
+    const iconUrl =
+      (metadata.softwareIcon512x512URL as string | undefined) ??
+      (metadata.softwareIcon57x57URL as string | undefined);
+    if (iconUrl) resolvedSoftware.artworkUrl = iconUrl;
+    const genre = metadata.genre as string | undefined;
+    if (genre) resolvedSoftware.primaryGenreName = genre;
+
     return {
       output: {
         downloadURL: url,
@@ -184,6 +213,7 @@ export async function getDownloadInfo(
         bundleShortVersionString: version,
         bundleVersion,
         iTunesMetadata,
+        resolvedSoftware,
       },
       updatedCookies: cookies,
     };

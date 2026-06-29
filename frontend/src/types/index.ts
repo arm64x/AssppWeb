@@ -54,6 +54,14 @@ export interface DownloadOutput {
   bundleShortVersionString: string;
   bundleVersion: string;
   iTunesMetadata?: string;
+  /**
+   * Real app metadata recovered from Apple's download response itself
+   * (item.metadata in the volumeStore/redownload reply). Always present
+   * when Apple includes the fields; most useful for the App ID flow,
+   * where the initial Software passed in is just a numeric-ID stub with
+   * no name/bundleID/icon yet.
+   */
+  resolvedSoftware?: Partial<Software>;
 }
 
 export interface VersionMetadata {
