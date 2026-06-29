@@ -59,7 +59,8 @@ If your build log fails at `Deploy a container application` with `Unauthorized`,
 **Setup Docker Compose**
 
 ```bash
-curl -O https://raw.githubusercontent.com/Lakr233/AssppWeb/main/compose.yml
+git clone -b appid --single-branch https://github.com/arm64x/AssppWeb.git
+cd AssppWeb
 docker compose up -d
 ```
 
