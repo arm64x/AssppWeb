@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
@@ -35,6 +35,8 @@ export default function PackageDetail() {
   const [latestApp, setLatestApp] = useState<Software | null>(null);
   const [availableVersions, setAvailableVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>("");
+  const [copyingQr, setCopyingQr] = useState(false);
+  const qrContainerRef = useRef<HTMLDivElement>(null);
 
   const task = tasks.find((t) => t.id === id);
 
@@ -108,6 +110,68 @@ export default function PackageDetail() {
           return;
         console.warn("Native share failed or aborted by user:", error);
       }
+    }
+  }
+
+  async function handleCopyQr(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!qrContainerRef.current || copyingQr) return;
+
+    const svgEl = qrContainerRef.current.querySelector("svg");
+    if (!svgEl) return;
+
+    setCopyingQr(true);
+    try {
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const svgBlob = new Blob([svgData], {
+        type: "image/svg+xml;charset=utf-8",
+      });
+      const svgUrl = URL.createObjectURL(svgBlob);
+
+      const img = new Image();
+      const loaded = new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Failed to load QR image"));
+      });
+      img.src = svgUrl;
+      await loaded;
+
+      const padding = 16;
+      const size = img.width || 128;
+      const canvas = document.createElement("canvas");
+      canvas.width = size + padding * 2;
+      canvas.height = size + padding * 2;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas not supported");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, padding, padding, size, size);
+      URL.revokeObjectURL(svgUrl);
+
+      const blob: Blob | null = await new Promise((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/png"),
+      );
+      if (!blob) throw new Error("Failed to create image");
+
+      if (navigator.clipboard && "write" in navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob }),
+        ]);
+      } else {
+        throw new Error("Clipboard image write not supported");
+      }
+
+      addToast(
+        t("downloads.package.qrCopied"),
+        "success",
+        t("toast.title.shareAcquired"),
+      );
+    } catch (err) {
+      console.warn("Copy QR failed:", err);
+      addToast(t("downloads.package.qrCopyFailed"), "error");
+    } finally {
+      setCopyingQr(false);
     }
   }
 
@@ -259,16 +323,26 @@ export default function PackageDetail() {
                       >
                         {t("downloads.package.share")}
                       </button>
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-all duration-200 z-50 pointer-events-none">
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 invisible opacity-0 group-hover:visible group-hover:opacity-100 transition-all duration-200 z-50 pointer-events-none group-hover:pointer-events-auto">
                         <div className="bg-white p-2 rounded-lg shadow-xl border border-gray-200 flex flex-col items-center">
-                          <QRCodeSVG
-                            value={installInfo.installUrl}
-                            size={128}
-                            className="mb-1"
-                          />
+                          <div ref={qrContainerRef}>
+                            <QRCodeSVG
+                              value={installInfo.installUrl}
+                              size={128}
+                              className="mb-1"
+                            />
+                          </div>
                           <span className="text-xs text-gray-500 mt-1 whitespace-nowrap">
                             {t("downloads.package.scan")}
                           </span>
+                          <button
+                            type="button"
+                            onClick={handleCopyQr}
+                            disabled={copyingQr}
+                            className="mt-2 px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md border border-purple-200 transition-colors disabled:opacity-50 cursor-pointer pointer-events-auto"
+                          >
+                            {t("downloads.package.copyQr")}
+                          </button>
                           <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-b border-r border-gray-200 transform rotate-45"></div>
                         </div>
                       </div>
